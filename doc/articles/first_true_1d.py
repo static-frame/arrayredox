@@ -10,7 +10,12 @@ from itertools import repeat
 from arraykit import first_true_1d as ak_first_true_1d
 import arraykit as ak
 
-from arrayredox import first_true_1d as ar_first_true_1d
+from arrayredox import first_true_1d_a as ar_first_true_1d_a
+from arrayredox import first_true_1d_b as ar_first_true_1d_b
+from arrayredox import first_true_1d_c as ar_first_true_1d_c
+from arrayredox import first_true_1d_d as ar_first_true_1d_d
+from arrayredox import first_true_1d_e as ar_first_true_1d_e
+from arrayredox import first_true_1d_f as ar_first_true_1d_f
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -35,13 +40,55 @@ class AKFirstTrue(ArrayProcessor):
     def __call__(self):
         _ = ak_first_true_1d(self.array, forward=True)
 
-class ARFirstTrue(ArrayProcessor):
-    NAME = 'ar.first_true_1d()'
+class ARFirstTrueA(ArrayProcessor):
+    NAME = 'ar.first_true_1d_a()'
     SORT = 0
 
     def __call__(self):
         # _ = ar_first_true_1d(self.array, forward=True)
-        _ = ar_first_true_1d(self.array)
+        _ = ar_first_true_1d_a(self.array)
+
+class ARFirstTrueB(ArrayProcessor):
+    NAME = 'ar.first_true_1d_b()'
+    SORT = 0
+
+    def __call__(self):
+        # _ = ar_first_true_1d(self.array, forward=True)
+        _ = ar_first_true_1d_b(self.array)
+
+class ARFirstTrueC(ArrayProcessor):
+    NAME = 'ar.first_true_1d_c()'
+    SORT = 0
+
+    def __call__(self):
+        # _ = ar_first_true_1d(self.array, forward=True)
+        _ = ar_first_true_1d_c(self.array)
+
+class ARFirstTrueD(ArrayProcessor):
+    NAME = 'ar.first_true_1d_d()'
+    SORT = 0
+
+    def __call__(self):
+        # _ = ar_first_true_1d(self.array, forward=True)
+        _ = ar_first_true_1d_d(self.array)
+
+class ARFirstTrueE(ArrayProcessor):
+    NAME = 'ar.first_true_1d_e()'
+    SORT = 0
+
+    def __call__(self):
+        # _ = ar_first_true_1d(self.array, forward=True)
+        _ = ar_first_true_1d_e(self.array)
+
+class ARFirstTrueF(ArrayProcessor):
+    NAME = 'ar.first_true_1d_f()'
+    SORT = 0
+
+    def __call__(self):
+        # _ = ar_first_true_1d(self.array, forward=True)
+        _ = ar_first_true_1d_f(self.array)
+
+
 
 
 class PYLoop(ArrayProcessor):
@@ -77,7 +124,7 @@ class NPNotAnyArgMax(ArrayProcessor):
         _ = np.argmax(self.array)
 
 #-------------------------------------------------------------------------------
-NUMBER = 100
+NUMBER = 10000
 
 def seconds_to_display(seconds: float) -> str:
     seconds /= NUMBER
@@ -258,9 +305,14 @@ def get_versions() -> str:
 
 CLS_PROCESSOR = (
     AKFirstTrue,
-    ARFirstTrue,
-    NPNonZero,
+    # ARFirstTrueA,
+    # ARFirstTrueB,
+    # ARFirstTrueC,
+    # ARFirstTrueD,
+    ARFirstTrueE,
+    ARFirstTrueF,
     NPArgMax,
+    # NPNonZero,
     # NPNotAnyArgMax,
     # PYLoop,
     )

@@ -11,3 +11,18 @@ crate-type = ["cdylib"]
 [dependencies]
 pyo3 = "0.25.0"
 numpy = "0.25.0"
+wide = "0.7.33"
+
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+
+[profile.dev]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+
+[build]
+rustflags = ["-C", "target-cpu=native"]
