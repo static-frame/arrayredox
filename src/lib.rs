@@ -1,11 +1,15 @@
+use numpy::PyReadonlyArray1;
 use pyo3::prelude::*;
 use wide::*;
-use numpy::{PyReadonlyArray1};
 
 #[pyfunction]
 fn first_true_1d_a(array: PyReadonlyArray1<bool>) -> isize {
     match array.as_slice() {
-        Ok(slice) => slice.iter().position(|&v| v).map(|i| i as isize).unwrap_or(-1),
+        Ok(slice) => slice
+            .iter()
+            .position(|&v| v)
+            .map(|i| i as isize)
+            .unwrap_or(-1),
         Err(_) => -1, // Should not happen for 1D arrays, but fallback to -1
     }
 }
@@ -43,28 +47,50 @@ fn first_true_1d_c(array: PyReadonlyArray1<bool>) -> isize {
 
         // Process 8 elements at a time
         while i + 8 <= len {
-            if slice[i] { return i as isize; }
-            if slice[i+1] { return (i+1) as isize; }
-            if slice[i+2] { return (i+2) as isize; }
-            if slice[i+3] { return (i+3) as isize; }
-            if slice[i+4] { return (i+4) as isize; }
-            if slice[i+5] { return (i+5) as isize; }
-            if slice[i+6] { return (i+6) as isize; }
-            if slice[i+7] { return (i+7) as isize; }
+            if slice[i] {
+                return i as isize;
+            }
+            if slice[i + 1] {
+                return (i + 1) as isize;
+            }
+            if slice[i + 2] {
+                return (i + 2) as isize;
+            }
+            if slice[i + 3] {
+                return (i + 3) as isize;
+            }
+            if slice[i + 4] {
+                return (i + 4) as isize;
+            }
+            if slice[i + 5] {
+                return (i + 5) as isize;
+            }
+            if slice[i + 6] {
+                return (i + 6) as isize;
+            }
+            if slice[i + 7] {
+                return (i + 7) as isize;
+            }
             i += 8;
         }
 
         // Handle remainder
         while i < len {
-            if slice[i] { return i as isize; }
+            if slice[i] {
+                return i as isize;
+            }
             i += 1;
         }
         -1
     } else {
-        array.as_array().iter().position(|&v| v).map(|i| i as isize).unwrap_or(-1)
+        array
+            .as_array()
+            .iter()
+            .position(|&v| v)
+            .map(|i| i as isize)
+            .unwrap_or(-1)
     }
 }
-
 
 #[pyfunction]
 fn first_true_1d_d(array: PyReadonlyArray1<bool>) -> isize {
@@ -75,29 +101,51 @@ fn first_true_1d_d(array: PyReadonlyArray1<bool>) -> isize {
         unsafe {
             // Process 8 elements at a time
             while i + 8 <= len {
-                if *slice.get_unchecked(i) { return i as isize; }
-                if *slice.get_unchecked(i+1) { return (i+1) as isize; }
-                if *slice.get_unchecked(i+2) { return (i+2) as isize; }
-                if *slice.get_unchecked(i+3) { return (i+3) as isize; }
-                if *slice.get_unchecked(i+4) { return (i+4) as isize; }
-                if *slice.get_unchecked(i+5) { return (i+5) as isize; }
-                if *slice.get_unchecked(i+6) { return (i+6) as isize; }
-                if *slice.get_unchecked(i+7) { return (i+7) as isize; }
+                if *slice.get_unchecked(i) {
+                    return i as isize;
+                }
+                if *slice.get_unchecked(i + 1) {
+                    return (i + 1) as isize;
+                }
+                if *slice.get_unchecked(i + 2) {
+                    return (i + 2) as isize;
+                }
+                if *slice.get_unchecked(i + 3) {
+                    return (i + 3) as isize;
+                }
+                if *slice.get_unchecked(i + 4) {
+                    return (i + 4) as isize;
+                }
+                if *slice.get_unchecked(i + 5) {
+                    return (i + 5) as isize;
+                }
+                if *slice.get_unchecked(i + 6) {
+                    return (i + 6) as isize;
+                }
+                if *slice.get_unchecked(i + 7) {
+                    return (i + 7) as isize;
+                }
                 i += 8;
             }
 
             // Handle remainder
             while i < len {
-                if *slice.get_unchecked(i) { return i as isize; }
+                if *slice.get_unchecked(i) {
+                    return i as isize;
+                }
                 i += 1;
             }
         }
         -1
     } else {
-        array.as_array().iter().position(|&v| v).map(|i| i as isize).unwrap_or(-1)
+        array
+            .as_array()
+            .iter()
+            .position(|&v| v)
+            .map(|i| i as isize)
+            .unwrap_or(-1)
     }
 }
-
 
 #[pyfunction]
 fn first_true_1d_e(array: PyReadonlyArray1<bool>) -> isize {
@@ -132,10 +180,14 @@ fn first_true_1d_e(array: PyReadonlyArray1<bool>) -> isize {
         }
         -1
     } else {
-        array.as_array().iter().position(|&v| v).map(|i| i as isize).unwrap_or(-1)
+        array
+            .as_array()
+            .iter()
+            .position(|&v| v)
+            .map(|i| i as isize)
+            .unwrap_or(-1)
     }
 }
-
 
 #[pyfunction]
 fn first_true_1d_f(py: Python, array: PyReadonlyArray1<bool>) -> isize {
@@ -174,11 +226,14 @@ fn first_true_1d_f(py: Python, array: PyReadonlyArray1<bool>) -> isize {
     } else {
         let array_view = array.as_array();
         py.allow_threads(|| {
-            array_view.iter().position(|&v| v).map(|i| i as isize).unwrap_or(-1)
+            array_view
+                .iter()
+                .position(|&v| v)
+                .map(|i| i as isize)
+                .unwrap_or(-1)
         })
     }
 }
-
 
 #[pyfunction]
 #[pyo3(signature = (array, forward=true))]
@@ -222,9 +277,9 @@ fn first_true_1d(py: Python, array: PyReadonlyArray1<bool>, forward: bool) -> is
                         let equal_one = chunk.cmp_eq(ones);
                         if equal_one.any() {
                             // Found a true in this chunk, search backwards within it
-                            for j in (0..32).rev() {
-                                if i + j < len && *ptr.add(i + j) != 0 {
-                                    return (i + j) as isize;
+                            for j in (i..i + 32).rev() {
+                                if *ptr.add(j) != 0 {
+                                    return j as isize;
                                 }
                             }
                         }
@@ -245,14 +300,21 @@ fn first_true_1d(py: Python, array: PyReadonlyArray1<bool>, forward: bool) -> is
         let array_view = array.as_array();
         py.allow_threads(|| {
             if forward {
-                array_view.iter().position(|&v| v).map(|i| i as isize).unwrap_or(-1)
+                array_view
+                    .iter()
+                    .position(|&v| v)
+                    .map(|i| i as isize)
+                    .unwrap_or(-1)
             } else {
-                array_view.iter().rposition(|&v| v).map(|i| i as isize).unwrap_or(-1)
+                array_view
+                    .iter()
+                    .rposition(|&v| v)
+                    .map(|i| i as isize)
+                    .unwrap_or(-1)
             }
         })
     }
 }
-
 
 #[pymodule]
 fn arrayredox(m: &Bound<'_, PyModule>) -> PyResult<()> {
