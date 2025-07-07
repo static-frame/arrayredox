@@ -180,6 +180,80 @@ fn first_true_1d_f(py: Python, array: PyReadonlyArray1<bool>) -> isize {
 }
 
 
+#[pyfunction]
+#[pyo3(signature = (array, forward=true))]
+fn first_true_1d(py: Python, array: PyReadonlyArray1<bool>, forward: bool) -> isize {
+    if let Ok(slice) = array.as_slice() {
+        py.allow_threads(|| {
+            let len = slice.len();
+            let ptr = slice.as_ptr() as *const u8;
+            let ones = u8x32::splat(1);
+
+            if forward {
+                let mut i = 0;
+                unsafe {
+                    // Process 32 bytes at a time with SIMD
+                    while i + 32 <= len {
+                        let bytes = &*(ptr.add(i) as *const [u8; 32]);
+                        let chunk = u8x32::from(*bytes);
+                        let equal_one = chunk.cmp_eq(ones);
+                        if equal_one.any() {
+                            break;
+                        }
+                        i += 32;
+                    }
+                    // Handle final remainder
+                    while i < len.min(i + 32) {
+                        if *ptr.add(i) != 0 {
+                            return i as isize;
+                        }
+                        i += 1;
+                    }
+                }
+            } else {
+                // Backward search
+                let mut i = len;
+                unsafe {
+                    // Process 32 bytes at a time with SIMD (backwards)
+                    while i >= 32 {
+                        i -= 32;
+                        let bytes = &*(ptr.add(i) as *const [u8; 32]);
+                        let chunk = u8x32::from(*bytes);
+                        let equal_one = chunk.cmp_eq(ones);
+                        if equal_one.any() {
+                            // Found a true in this chunk, search backwards within it
+                            for j in (0..32).rev() {
+                                if i + j < len && *ptr.add(i + j) != 0 {
+                                    return (i + j) as isize;
+                                }
+                            }
+                        }
+                    }
+                    // Handle remaining bytes at the beginning
+                    if i > 0 {
+                        for j in (0..i).rev() {
+                            if *ptr.add(j) != 0 {
+                                return j as isize;
+                            }
+                        }
+                    }
+                }
+            }
+            -1
+        })
+    } else {
+        let array_view = array.as_array();
+        py.allow_threads(|| {
+            if forward {
+                array_view.iter().position(|&v| v).map(|i| i as isize).unwrap_or(-1)
+            } else {
+                array_view.iter().rposition(|&v| v).map(|i| i as isize).unwrap_or(-1)
+            }
+        })
+    }
+}
+
+
 #[pymodule]
 fn arrayredox(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(first_true_1d_a, m)?)?;
@@ -188,5 +262,6 @@ fn arrayredox(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(first_true_1d_d, m)?)?;
     m.add_function(wrap_pyfunction!(first_true_1d_e, m)?)?;
     m.add_function(wrap_pyfunction!(first_true_1d_f, m)?)?;
+    m.add_function(wrap_pyfunction!(first_true_1d, m)?)?;
     Ok(())
 }
