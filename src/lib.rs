@@ -1,8 +1,7 @@
 use numpy::PyReadonlyArray1;
 use pyo3::prelude::*;
 use wide::*;
-use pyo3::types::PyBool;
-use pyo3::types::PyAny;
+// use pyo3::types::{PyBool, PyAny};
 
 #[pyfunction]
 fn first_true_1d_a(array: PyReadonlyArray1<bool>) -> isize {
@@ -241,7 +240,7 @@ fn first_true_1d_f(py: Python, array: PyReadonlyArray1<bool>) -> isize {
 #[pyo3(signature = (array, forward=true))]
 fn first_true_1d(py: Python,
     array: PyReadonlyArray1<bool>,
-    forward: &PyBool
+    forward: bool,
 ) -> isize {
     if let Ok(slice) = array.as_slice() {
         py.allow_threads(|| {
@@ -249,7 +248,7 @@ fn first_true_1d(py: Python,
             let ptr = slice.as_ptr() as *const u8;
             let ones = u8x32::splat(1);
 
-            if forward.is_true()? {
+            if forward {
                 let mut i = 0;
                 unsafe {
                     // Process 32 bytes at a time with SIMD
@@ -304,7 +303,7 @@ fn first_true_1d(py: Python,
     } else {
         let array_view = array.as_array();
         py.allow_threads(|| {
-            if forward.is_true()? {
+            if forward {
                 array_view
                     .iter()
                     .position(|&v| v)
