@@ -15,7 +15,8 @@ from arrayredox import first_true_1d_b as ar_first_true_1d_b
 from arrayredox import first_true_1d_c as ar_first_true_1d_c
 from arrayredox import first_true_1d_d as ar_first_true_1d_d
 from arrayredox import first_true_1d_e as ar_first_true_1d_e
-from arrayredox import first_true_1d_f as ar_first_true_1d_f
+from arrayredox import first_true_1d as ar_first_true_1d_f
+# from arrayredox import first_true_1d_g as ar_first_true_1d_g
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -69,7 +70,6 @@ class ARFirstTrueD(ArrayProcessor):
     SORT = 0
 
     def __call__(self):
-        # _ = ar_first_true_1d(self.array, forward=True)
         _ = ar_first_true_1d_d(self.array)
 
 class ARFirstTrueE(ArrayProcessor):
@@ -77,7 +77,6 @@ class ARFirstTrueE(ArrayProcessor):
     SORT = 0
 
     def __call__(self):
-        # _ = ar_first_true_1d(self.array, forward=True)
         _ = ar_first_true_1d_e(self.array)
 
 class ARFirstTrueF(ArrayProcessor):
@@ -85,9 +84,14 @@ class ARFirstTrueF(ArrayProcessor):
     SORT = 0
 
     def __call__(self):
-        # _ = ar_first_true_1d(self.array, forward=True)
         _ = ar_first_true_1d_f(self.array)
 
+# class ARFirstTrueG(ArrayProcessor):
+#     NAME = 'ar.first_true_1d_g()'
+#     SORT = 0
+
+#     def __call__(self):
+#         _ = ar_first_true_1d_g(self.array)
 
 
 
@@ -311,6 +315,7 @@ CLS_PROCESSOR = (
     # ARFirstTrueD,
     ARFirstTrueE,
     ARFirstTrueF,
+    # ARFirstTrueG,
     NPArgMax,
     # NPNonZero,
     # NPNotAnyArgMax,

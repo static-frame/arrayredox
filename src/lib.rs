@@ -1,7 +1,19 @@
+#![feature(portable_simd)]
+
 use numpy::PyReadonlyArray1;
 use pyo3::prelude::*;
-use wide::*;
+use pyo3::exceptions::PyValueError;
+use pyo3::Bound;
 // use pyo3::types::{PyBool, PyAny};
+use wide::*;
+// use std::simd::Simd;
+// use std::simd::cmp::SimdPartialEq;
+
+use numpy::{IntoPyArray, PyArray2, PyReadonlyArray2};
+use numpy::ToPyArray;
+use numpy::PyArrayMethods;
+use numpy::PyUntypedArrayMethods;
+
 
 #[pyfunction]
 fn first_true_1d_a(array: PyReadonlyArray1<bool>) -> isize {
@@ -190,51 +202,6 @@ fn first_true_1d_e(array: PyReadonlyArray1<bool>) -> isize {
     }
 }
 
-#[pyfunction]
-fn first_true_1d_f(py: Python, array: PyReadonlyArray1<bool>) -> isize {
-    if let Ok(slice) = array.as_slice() {
-        py.allow_threads(|| {
-            let len = slice.len();
-            let ptr = slice.as_ptr() as *const u8;
-            let mut i = 0;
-
-            let ones = u8x32::splat(1);
-            unsafe {
-                // Process 32 bytes at a time with SIMD
-                while i + 32 <= len {
-                    // Cast pointer to array reference
-                    let bytes = &*(ptr.add(i) as *const [u8; 32]);
-
-                    // Convert to SIMD vector
-                    let chunk = u8x32::from(*bytes);
-                    let equal_one = chunk.cmp_eq(ones);
-                    if equal_one.any() {
-                        break;
-                    }
-
-                    i += 32;
-                }
-                // // Handle final remainder
-                while i < len.min(i + 32) {
-                    if *ptr.add(i) != 0 {
-                        return i as isize;
-                    }
-                    i += 1;
-                }
-                -1
-            }
-        })
-    } else {
-        let array_view = array.as_array();
-        py.allow_threads(|| {
-            array_view
-                .iter()
-                .position(|&v| v)
-                .map(|i| i as isize)
-                .unwrap_or(-1)
-        })
-    }
-}
 
 #[pyfunction]
 #[pyo3(signature = (array, forward=true))]
@@ -243,6 +210,8 @@ fn first_true_1d(py: Python,
     forward: bool,
 ) -> isize {
     if let Ok(slice) = array.as_slice() {
+        const LANES: usize = 32;
+
         py.allow_threads(|| {
             let len = slice.len();
             let ptr = slice.as_ptr() as *const u8;
@@ -252,17 +221,17 @@ fn first_true_1d(py: Python,
                 let mut i = 0;
                 unsafe {
                     // Process 32 bytes at a time with SIMD
-                    while i + 32 <= len {
-                        let bytes = &*(ptr.add(i) as *const [u8; 32]);
+                    while i + LANES <= len {
+                        let bytes = &*(ptr.add(i) as *const [u8; LANES]);
                         let chunk = u8x32::from(*bytes);
                         let equal_one = chunk.cmp_eq(ones);
                         if equal_one.any() {
                             break;
                         }
-                        i += 32;
+                        i += LANES;
                     }
                     // Handle final remainder
-                    while i < len.min(i + 32) {
+                    while i < len.min(i + LANES) {
                         if *ptr.add(i) != 0 {
                             return i as isize;
                         }
@@ -273,15 +242,15 @@ fn first_true_1d(py: Python,
                 // Backward search
                 let mut i = len;
                 unsafe {
-                    // Process 32 bytes at a time with SIMD (backwards)
-                    while i >= 32 {
-                        i -= 32;
-                        let bytes = &*(ptr.add(i) as *const [u8; 32]);
+                    // Process LANES bytes at a time with SIMD (backwards)
+                    while i >= LANES {
+                        i -= LANES;
+                        let bytes = &*(ptr.add(i) as *const [u8; LANES]);
                         let chunk = u8x32::from(*bytes);
                         let equal_one = chunk.cmp_eq(ones);
                         if equal_one.any() {
                             // Found a true in this chunk, search backwards within it
-                            for j in (i..i + 32).rev() {
+                            for j in (i..i + LANES).rev() {
                                 if *ptr.add(j) != 0 {
                                     return j as isize;
                                 }
@@ -320,6 +289,103 @@ fn first_true_1d(py: Python,
     }
 }
 
+
+
+// #[pyfunction]
+// fn first_true_1d_g(py: Python, array: PyReadonlyArray1<bool>) -> isize {
+//     if let Ok(slice) = array.as_slice() {
+//         py.allow_threads(|| {
+//             let len = slice.len();
+//             let ptr = slice.as_ptr() as *const u8;
+//             let mut i = 0;
+
+//             type Lane = u8;
+//             const LANES: usize = 64;
+//             let ones = Simd::<Lane, LANES>::splat(1);
+
+//             unsafe {
+//                 while i + LANES <= len {
+//                     let chunk_ptr = ptr.add(i) as *const [u8; LANES];
+//                     let chunk = Simd::from(*chunk_ptr);
+//                     let mask = chunk.simd_eq(ones).to_bitmask();
+
+//                     if mask != 0 {
+//                         let offset = mask.trailing_zeros() as usize;
+//                         return (i + offset) as isize;
+//                     }
+
+//                     i += LANES;
+//                 }
+
+//                 // Remainder (non-SIMD tail)
+//                 while i < len {
+//                     if *ptr.add(i) != 0 {
+//                         return i as isize;
+//                     }
+//                     i += 1;
+//                 }
+//             }
+
+//             -1
+//         })
+//     } else {
+//         // Fallback for non-contiguous arrays
+//         let view = array.as_array();
+//         py.allow_threads(|| {
+//             view.iter()
+//                 .position(|&v| v)
+//                 .map(|i| i as isize)
+//                 .unwrap_or(-1)
+//         })
+//     }
+// }
+
+
+//------------------------------------------------------------------------------
+
+
+fn prepare_array_for_axis<'py>(
+    py: Python<'py>,
+    array: PyReadonlyArray2<'py, bool>,
+    axis: usize,
+) -> PyResult<Bound<'py, PyArray2<bool>>> {
+    if axis != 0 && axis != 1 {
+        return Err(PyValueError::new_err("axis must be 0 or 1"));
+    }
+
+    let is_c = array.is_c_contiguous();
+    let is_f = array.is_fortran_contiguous();
+
+    match (is_c, is_f, axis) {
+        (true, _, 0) => {
+            let transposed = array.as_array().reversed_axes().to_owned();
+            Ok(transposed.into_pyarray(py))
+        }
+        (true, _, 1) => Ok(array.as_array().to_owned().into_pyarray(py)),  // copy to get full ownership
+        (_, true, 0) => {
+            let transposed = array.as_array().reversed_axes();
+            Ok(transposed.to_owned().into_pyarray(py))
+        }
+        (_, true, 1) => {
+            let owned = array.as_array().to_owned();
+            Ok(owned.into_pyarray(py))
+        }
+        (false, false, 0) => {
+            let transposed = array.as_array().reversed_axes().to_owned();
+            Ok(transposed.into_pyarray(py))
+        }
+        (false, false, 1) => {
+            let owned = array.as_array().to_owned();
+            Ok(owned.into_pyarray(py))
+        }
+        _ => unreachable!(),
+    }
+}
+
+
+//------------------------------------------------------------------------------
+
+
 #[pymodule]
 fn arrayredox(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(first_true_1d_a, m)?)?;
@@ -327,7 +393,7 @@ fn arrayredox(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(first_true_1d_c, m)?)?;
     m.add_function(wrap_pyfunction!(first_true_1d_d, m)?)?;
     m.add_function(wrap_pyfunction!(first_true_1d_e, m)?)?;
-    m.add_function(wrap_pyfunction!(first_true_1d_f, m)?)?;
+    // m.add_function(wrap_pyfunction!(first_true_1d_g, m)?)?;
     m.add_function(wrap_pyfunction!(first_true_1d, m)?)?;
     Ok(())
 }
