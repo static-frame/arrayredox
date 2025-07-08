@@ -1,5 +1,3 @@
-#![feature(portable_simd)]
-
 use numpy::PyReadonlyArray1;
 use pyo3::prelude::*;
 use pyo3::exceptions::PyValueError;
