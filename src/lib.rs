@@ -7,11 +7,11 @@ use wide::*;
 // use std::simd::Simd;
 // use std::simd::cmp::SimdPartialEq;
 
+use numpy::PyArray1;
 use numpy::PyArrayMethods;
 use numpy::PyUntypedArrayMethods;
 use numpy::ToPyArray;
 use numpy::{PyArray2, PyReadonlyArray2};
-use numpy::PyArray1;
 
 #[pyfunction]
 fn first_true_1d_a(array: PyReadonlyArray1<bool>) -> isize {
@@ -334,7 +334,6 @@ fn first_true_1d(py: Python, array: PyReadonlyArray1<bool>, forward: bool) -> is
 
 //------------------------------------------------------------------------------
 
-
 // NOTE: we copy the entire array into contiguous memory when necessary.
 // axis = 0 returns the pos per col
 // axis = 1 returns the pos per row (as contiguous bytes)
@@ -418,7 +417,6 @@ pub fn first_true_2d<'py>(
 
     Ok(PyArray1::from_vec(py, result).to_owned())
 }
-
 
 //------------------------------------------------------------------------------
 
