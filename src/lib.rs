@@ -201,7 +201,7 @@ fn first_true_1d_e(array: PyReadonlyArray1<bool>) -> isize {
 }
 
 #[pyfunction]
-#[pyo3(signature = (array, forward=true))]
+#[pyo3(signature = (array, *, forward=true))]
 fn first_true_1d(py: Python, array: PyReadonlyArray1<bool>, forward: bool) -> isize {
     if let Ok(slice) = array.as_slice() {
         const LANES: usize = 32;
@@ -241,8 +241,7 @@ fn first_true_1d(py: Python, array: PyReadonlyArray1<bool>, forward: bool) -> is
                         i -= LANES;
                         let bytes = &*(ptr.add(i) as *const [u8; LANES]);
                         let chunk = u8x32::from(*bytes);
-                        let equal_one = chunk.cmp_eq(ones);
-                        if equal_one.any() {
+                        if chunk.cmp_eq(ones).any() {
                             // Found a true in this chunk, search backwards within it
                             for j in (i..i + LANES).rev() {
                                 if *ptr.add(j) != 0 {
@@ -350,7 +349,7 @@ fn first_true_1d(py: Python, array: PyReadonlyArray1<bool>, forward: bool) -> is
 fn prepare_array_for_axis<'py>(
     py: Python<'py>,
     array: PyReadonlyArray2<'py, bool>,
-    axis: usize,
+    axis: isize,
 ) -> PyResult<Bound<'py, PyArray2<bool>>> {
     if axis != 0 && axis != 1 {
         return Err(PyValueError::new_err("axis must be 0 or 1"));
@@ -358,23 +357,45 @@ fn prepare_array_for_axis<'py>(
 
     let is_c = array.is_c_contiguous();
     let is_f = array.is_fortran_contiguous();
+    let array_view = array.as_array();
 
     match (is_c, is_f, axis) {
-        (true, _, 0) => Ok(array.as_array().reversed_axes().to_pyarray(py)),
-        (true, _, 1) => Ok(array.as_array().to_pyarray(py)),
-        (_, true, 0) => Ok(array.as_array().reversed_axes().to_pyarray(py)),
-        (_, true, 1) => Ok(array.as_array().to_pyarray(py)),
-        (_, _, 0) => Ok(array.as_array().reversed_axes().to_pyarray(py)),
-        (_, _, 1) => Ok(array.as_array().to_pyarray(py)),
+        (true, _, 1) => {
+            // Already C-contiguous, no copy needed
+            Ok(array_view.to_pyarray(py).to_owned())
+        }
+        (_, true, 0) => {
+            // F-contiguous original -> transposed will be C-contiguous, no copy needed
+            Ok(array_view.reversed_axes().to_pyarray(py).to_owned())
+        }
+        (_, true, 1) => {
+            // F-contiguous, need to copy to C-contiguous
+            let contiguous = array_view.as_standard_layout();
+            Ok(contiguous.to_pyarray(py).to_owned())
+        }
+        (_, _, 1) => {
+            // Neither C nor F contiguous, need to copy
+            let contiguous = array_view.as_standard_layout();
+            Ok(contiguous.to_pyarray(py).to_owned())
+        }
+
+        (true, _, 0) | (_, _, 0) => {
+            // C-contiguous or neither -> transposed won't be C-contiguous, need copy
+            let transposed = array_view.reversed_axes();
+            let contiguous = transposed.as_standard_layout();
+            Ok(contiguous.to_pyarray(py).to_owned())
+        }
         _ => unreachable!(),
     }
 }
 
 #[pyfunction]
+#[pyo3(signature = (array, *, forward=true, axis))]
 pub fn first_true_2d<'py>(
     py: Python<'py>,
     array: PyReadonlyArray2<'py, bool>,
-    axis: usize,
+    forward: bool,
+    axis: isize,
 ) -> PyResult<Bound<'py, PyArray1<isize>>> {
     let prepped = prepare_array_for_axis(py, array, axis)?;
     let view = unsafe { prepped.as_array() };
@@ -387,28 +408,62 @@ pub fn first_true_2d<'py>(
         const LANES: usize = 32;
         let ones = u8x32::splat(1);
 
+
         for row in 0..rows {
             let mut found = -1;
             let row_slice = &view.row(row);
             let ptr = row_slice.as_ptr() as *const u8;
             let len = row_slice.len();
-            let mut i = 0;
 
-            unsafe {
-                while i + LANES <= len {
-                    let chunk = &*(ptr.add(i) as *const [u8; LANES]);
-                    let vec = u8x32::from(*chunk);
-                    if vec.cmp_eq(ones).any() {
-                        break;
+            if forward {
+                // Forward search
+                let mut i = 0;
+                unsafe {
+                    while i + LANES <= len {
+                        let chunk = &*(ptr.add(i) as *const [u8; LANES]);
+                        let vec = u8x32::from(*chunk);
+                        if vec.cmp_eq(ones).any() {
+                            break;
+                        }
+                        i += LANES;
                     }
-                    i += LANES;
+                    while i < len {
+                        if *ptr.add(i) != 0 {
+                            found = i as isize;
+                            break;
+                        }
+                        i += 1;
+                    }
                 }
-                while i < len {
-                    if *ptr.add(i) != 0 {
-                        found = i as isize;
-                        break;
+            } else {
+                // Backward search
+                let mut i = len;
+                unsafe {
+                    // Process LANES bytes at a time with SIMD (backwards)
+                    while i >= LANES {
+                        i -= LANES;
+                        let chunk = &*(ptr.add(i) as *const [u8; LANES]);
+                        let vec = u8x32::from(*chunk);
+                        if vec.cmp_eq(ones).any() {
+                            // Found a true in this chunk, search backwards within it
+                            for j in (i..i + LANES).rev() {
+                                if *ptr.add(j) != 0 {
+                                    found = j as isize;
+                                    break;
+                                }
+                            }
+                            break;
+                        }
                     }
-                    i += 1;
+                    // Handle remaining bytes at the beginning
+                    if found == -1 && i > 0 {
+                        for j in (0..i).rev() {
+                            if *ptr.add(j) != 0 {
+                                found = j as isize;
+                                break;
+                            }
+                        }
+                    }
                 }
             }
             result.push(found);
