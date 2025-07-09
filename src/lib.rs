@@ -400,6 +400,7 @@ pub fn first_true_2d<'py>(
     let prepped = prepare_array_for_axis(py, array, axis)?;
     let view = unsafe { prepped.as_array() };
 
+    // let view = array.as_array();
     // NOTE: these are rows in the view, not always the same as rows
     let rows = view.nrows();
     let mut result = Vec::with_capacity(rows);
@@ -407,7 +408,6 @@ pub fn first_true_2d<'py>(
     py.allow_threads(|| {
         const LANES: usize = 32;
         let ones = u8x32::splat(1);
-
 
         for row in 0..rows {
             let mut found = -1;
