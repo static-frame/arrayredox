@@ -431,5 +431,6 @@ fn arrayredox(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(first_true_1d_e, m)?)?;
     // m.add_function(wrap_pyfunction!(first_true_1d_g, m)?)?;
     m.add_function(wrap_pyfunction!(first_true_1d, m)?)?;
+    m.add_function(wrap_pyfunction!(first_true_2d, m)?)?;
     Ok(())
 }
