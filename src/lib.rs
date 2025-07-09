@@ -12,6 +12,7 @@ use numpy::PyArrayMethods;
 use numpy::PyUntypedArrayMethods;
 use numpy::ToPyArray;
 use numpy::{PyArray2, PyReadonlyArray2};
+use numpy::IntoPyArray;
 
 #[pyfunction]
 fn first_true_1d_a(array: PyReadonlyArray1<bool>) -> isize {
@@ -346,48 +347,126 @@ fn first_true_1d(py: Python, array: PyReadonlyArray1<bool>, forward: bool) -> is
 //     axis == 0: transpose, copy to C
 //     axis == 1: copy to C
 
-fn prepare_array_for_axis<'py>(
+// fn prepare_array_for_axis<'py>(
+//     py: Python<'py>,
+//     array: PyReadonlyArray2<'py, bool>,
+//     axis: isize,
+// ) -> PyResult<Bound<'py, PyArray2<bool>>> {
+//     if axis != 0 && axis != 1 {
+//         return Err(PyValueError::new_err("axis must be 0 or 1"));
+//     }
+
+//     let is_c = array.is_c_contiguous();
+//     let is_f = array.is_fortran_contiguous();
+//     let array_view = array.as_array();
+
+//     match (is_c, is_f, axis) {
+//         (true, _, 1) => {
+//             // Already C-contiguous, no copy needed
+//             Ok(array_view.to_pyarray(py).to_owned())
+//         }
+//         (_, true, 0) => {
+//             // F-contiguous original -> transposed will be C-contiguous, no copy needed
+//             Ok(array_view.reversed_axes().to_pyarray(py).to_owned())
+//         }
+//         (_, true, 1) => {
+//             // F-contiguous, need to copy to C-contiguous
+//             let contiguous = array_view.as_standard_layout();
+//             Ok(contiguous.to_pyarray(py).to_owned())
+//         }
+//         (_, _, 1) => {
+//             // Neither C nor F contiguous, need to copy
+//             let contiguous = array_view.as_standard_layout();
+//             Ok(contiguous.to_pyarray(py).to_owned())
+//         }
+
+//         (true, _, 0) | (_, _, 0) => {
+//             // C-contiguous or neither -> transposed won't be C-contiguous, need copy
+//             let transposed = array_view.reversed_axes();
+//             let contiguous = transposed.as_standard_layout();
+//             Ok(contiguous.to_pyarray(py).to_owned())
+//         }
+//         _ => unreachable!(),
+//     }
+// }
+
+
+// use numpy::{PyReadonlyArray2, IntoPyArray, PyArray2};
+// use pyo3::prelude::*;
+
+pub struct PreparedBool2D<'py> {
+    pub data: &'py [u8],                   // flat contiguous buffer
+    pub nrows: usize,                      // number of logical rows
+    pub ncols: usize,
+    _keepalive: Option<Bound<'py, PyAny>>,  // holds any copied/transposed buffer
+}
+
+pub fn prepare_array_for_axis<'py>(
     py: Python<'py>,
     array: PyReadonlyArray2<'py, bool>,
     axis: isize,
-) -> PyResult<Bound<'py, PyArray2<bool>>> {
+) -> PyResult<PreparedBool2D<'py>> {
     if axis != 0 && axis != 1 {
         return Err(PyValueError::new_err("axis must be 0 or 1"));
     }
+
+    let shape = array.shape();
+    let (nrows, ncols) = if axis == 0 {
+        (shape[1], shape[0]) // transposed
+    } else {
+        (shape[0], shape[1]) // as-is
+    };
 
     let is_c = array.is_c_contiguous();
     let is_f = array.is_fortran_contiguous();
     let array_view = array.as_array();
 
-    match (is_c, is_f, axis) {
-        (true, _, 1) => {
-            // Already C-contiguous, no copy needed
-            Ok(array_view.to_pyarray(py).to_owned())
+    // Case 1: C-contiguous + axis=1 → zero-copy slice
+    if is_c && axis == 1 {
+        if let Ok(slice) = array.as_slice() {
+            return Ok(PreparedBool2D {
+                data: unsafe { std::mem::transmute(slice) }, // &[bool] → &[u8]
+                nrows,
+                ncols,
+                _keepalive: None,
+            });
         }
-        (_, true, 0) => {
-            // F-contiguous original -> transposed will be C-contiguous, no copy needed
-            Ok(array_view.reversed_axes().to_pyarray(py).to_owned())
-        }
-        (_, true, 1) => {
-            // F-contiguous, need to copy to C-contiguous
-            let contiguous = array_view.as_standard_layout();
-            Ok(contiguous.to_pyarray(py).to_owned())
-        }
-        (_, _, 1) => {
-            // Neither C nor F contiguous, need to copy
-            let contiguous = array_view.as_standard_layout();
-            Ok(contiguous.to_pyarray(py).to_owned())
-        }
-
-        (true, _, 0) | (_, _, 0) => {
-            // C-contiguous or neither -> transposed won't be C-contiguous, need copy
-            let transposed = array_view.reversed_axes();
-            let contiguous = transposed.as_standard_layout();
-            Ok(contiguous.to_pyarray(py).to_owned())
-        }
-        _ => unreachable!(),
     }
+
+    // Case 2: F-contiguous + axis=0 → transpose, check if sliceable
+    if is_f && axis == 0 {
+        let transposed = array_view.reversed_axes();
+        if let Some(slice) = transposed.as_standard_layout().as_slice_memory_order() {
+            return Ok(PreparedBool2D {
+                data: unsafe { std::mem::transmute(slice) },
+                nrows,
+                ncols,
+                _keepalive: None,
+            });
+        }
+    }
+
+    // Case 3: fallback — create a new C-contiguous owned array
+    let prepared_array: Bound<'py, PyArray2<bool>> = if axis == 0 {
+        array_view.reversed_axes().as_standard_layout().to_owned().to_pyarray(py)
+    } else {
+        array_view.as_standard_layout().to_owned().to_pyarray(py)
+    };
+
+    let array_view = unsafe { prepared_array.as_array() };
+    let prepared_slice = array_view
+            .as_slice_memory_order()
+            .expect("Newly allocated array must be contiguous");
+
+    Ok(PreparedBool2D {
+        data: unsafe { std::mem::transmute(prepared_slice) },
+        nrows,
+        ncols,
+        _keepalive: Some(prepared_array.into_any()),
+    })
 }
+
+
 
 #[pyfunction]
 #[pyo3(signature = (array, *, forward=true, axis))]
@@ -397,29 +476,39 @@ pub fn first_true_2d<'py>(
     forward: bool,
     axis: isize,
 ) -> PyResult<Bound<'py, PyArray1<isize>>> {
-    let prepped = prepare_array_for_axis(py, array, axis)?;
-    let view = unsafe { prepped.as_array() };
 
-    // let view = array.as_array();
-    // NOTE: these are rows in the view, not always the same as rows
-    let rows = view.nrows();
-    let mut result = Vec::with_capacity(rows);
+    // let prepped = prepare_array_for_axis(py, array, axis)?;
+    // let view = unsafe { prepped.as_array() };
+    // // NOTE: these are rows in the view, not always the same as rows
+    // let rows = view.nrows();
+
+    let prepared = prepare_array_for_axis(py, array, axis)?;
+    let data = prepared.data;
+    let rows = prepared.nrows;
+    let row_len = prepared.ncols;
+
+    let mut result = vec![-1isize; rows];
 
     py.allow_threads(|| {
         const LANES: usize = 32;
         let ones = u8x32::splat(1);
 
+        let base_ptr = data.as_ptr();
+
         for row in 0..rows {
-            let mut found = -1;
-            let row_slice = &view.row(row);
-            let ptr = row_slice.as_ptr() as *const u8;
-            let len = row_slice.len();
+
+            let ptr = unsafe { base_ptr.add(row * row_len) };
+
+            // let mut found = -1;
+            // let row_slice = &view.row(row);
+            // let ptr = row_slice.as_ptr() as *const u8;
+            // let len = row_slice.len();
 
             if forward {
                 // Forward search
                 let mut i = 0;
                 unsafe {
-                    while i + LANES <= len {
+                    while i + LANES <= row_len {
                         let chunk = &*(ptr.add(i) as *const [u8; LANES]);
                         let vec = u8x32::from(*chunk);
                         if vec.cmp_eq(ones).any() {
@@ -427,9 +516,10 @@ pub fn first_true_2d<'py>(
                         }
                         i += LANES;
                     }
-                    while i < len {
+                    while i < row_len {
                         if *ptr.add(i) != 0 {
-                            found = i as isize;
+                            // found = i as isize;
+                            result[row] = i as isize;
                             break;
                         }
                         i += 1;
@@ -437,7 +527,7 @@ pub fn first_true_2d<'py>(
                 }
             } else {
                 // Backward search
-                let mut i = len;
+                let mut i = row_len;
                 unsafe {
                     // Process LANES bytes at a time with SIMD (backwards)
                     while i >= LANES {
@@ -448,7 +538,8 @@ pub fn first_true_2d<'py>(
                             // Found a true in this chunk, search backwards within it
                             for j in (i..i + LANES).rev() {
                                 if *ptr.add(j) != 0 {
-                                    found = j as isize;
+                                    // found = j as isize;
+                                    result[row] = j as isize;
                                     break;
                                 }
                             }
@@ -456,17 +547,17 @@ pub fn first_true_2d<'py>(
                         }
                     }
                     // Handle remaining bytes at the beginning
-                    if found == -1 && i > 0 {
+                    if i > 0 && i < LANES {
                         for j in (0..i).rev() {
                             if *ptr.add(j) != 0 {
-                                found = j as isize;
+                                // found = j as isize;
+                                result[row] = j as isize;
                                 break;
                             }
                         }
                     }
                 }
             }
-            result.push(found);
         }
     });
 
