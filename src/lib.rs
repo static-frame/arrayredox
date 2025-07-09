@@ -1,17 +1,17 @@
 use numpy::PyReadonlyArray1;
-use pyo3::prelude::*;
 use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
 use pyo3::Bound;
 // use pyo3::types::{PyBool, PyAny};
 use wide::*;
 // use std::simd::Simd;
 // use std::simd::cmp::SimdPartialEq;
 
-use numpy::{IntoPyArray, PyArray2, PyReadonlyArray2};
-use numpy::ToPyArray;
 use numpy::PyArrayMethods;
 use numpy::PyUntypedArrayMethods;
-
+use numpy::ToPyArray;
+use numpy::{PyArray2, PyReadonlyArray2};
+use numpy::PyArray1;
 
 #[pyfunction]
 fn first_true_1d_a(array: PyReadonlyArray1<bool>) -> isize {
@@ -200,13 +200,9 @@ fn first_true_1d_e(array: PyReadonlyArray1<bool>) -> isize {
     }
 }
 
-
 #[pyfunction]
 #[pyo3(signature = (array, forward=true))]
-fn first_true_1d(py: Python,
-    array: PyReadonlyArray1<bool>,
-    forward: bool,
-) -> isize {
+fn first_true_1d(py: Python, array: PyReadonlyArray1<bool>, forward: bool) -> isize {
     if let Ok(slice) = array.as_slice() {
         const LANES: usize = 32;
 
@@ -287,8 +283,6 @@ fn first_true_1d(py: Python,
     }
 }
 
-
-
 // #[pyfunction]
 // fn first_true_1d_g(py: Python, array: PyReadonlyArray1<bool>) -> isize {
 //     if let Ok(slice) = array.as_slice() {
@@ -338,9 +332,21 @@ fn first_true_1d(py: Python,
 //     }
 // }
 
-
 //------------------------------------------------------------------------------
 
+
+// NOTE: we copy the entire array into contiguous memory when necessary.
+// axis = 0 returns the pos per col
+// axis = 1 returns the pos per row (as contiguous bytes)
+// if c contiguous:
+//      axis == 0: transpose, copy to C
+//      axis == 1: keep
+// if f contiguous:
+//      axis == 0: transpose, keep
+//      axis == 1: copy to C
+// else
+//     axis == 0: transpose, copy to C
+//     axis == 1: copy to C
 
 fn prepare_array_for_axis<'py>(
     py: Python<'py>,
@@ -355,34 +361,66 @@ fn prepare_array_for_axis<'py>(
     let is_f = array.is_fortran_contiguous();
 
     match (is_c, is_f, axis) {
-        (true, _, 0) => {
-            let transposed = array.as_array().reversed_axes().to_owned();
-            Ok(transposed.into_pyarray(py))
-        }
-        (true, _, 1) => Ok(array.as_array().to_owned().into_pyarray(py)),  // copy to get full ownership
-        (_, true, 0) => {
-            let transposed = array.as_array().reversed_axes();
-            Ok(transposed.to_owned().into_pyarray(py))
-        }
-        (_, true, 1) => {
-            let owned = array.as_array().to_owned();
-            Ok(owned.into_pyarray(py))
-        }
-        (false, false, 0) => {
-            let transposed = array.as_array().reversed_axes().to_owned();
-            Ok(transposed.into_pyarray(py))
-        }
-        (false, false, 1) => {
-            let owned = array.as_array().to_owned();
-            Ok(owned.into_pyarray(py))
-        }
+        (true, _, 0) => Ok(array.as_array().reversed_axes().to_pyarray(py)),
+        (true, _, 1) => Ok(array.as_array().to_pyarray(py)),
+        (_, true, 0) => Ok(array.as_array().reversed_axes().to_pyarray(py)),
+        (_, true, 1) => Ok(array.as_array().to_pyarray(py)),
+        (_, _, 0) => Ok(array.as_array().reversed_axes().to_pyarray(py)),
+        (_, _, 1) => Ok(array.as_array().to_pyarray(py)),
         _ => unreachable!(),
     }
 }
 
+#[pyfunction]
+pub fn first_true_2d<'py>(
+    py: Python<'py>,
+    array: PyReadonlyArray2<'py, bool>,
+    axis: usize,
+) -> PyResult<Bound<'py, PyArray1<isize>>> {
+    let prepped = prepare_array_for_axis(py, array, axis)?;
+    let view = unsafe { prepped.as_array() };
+
+    // NOTE: these are rows in the view, not always the same as rows
+    let rows = view.nrows();
+    let mut result = Vec::with_capacity(rows);
+
+    py.allow_threads(|| {
+        const LANES: usize = 32;
+        let ones = u8x32::splat(1);
+
+        for row in 0..rows {
+            let mut found = -1;
+            let row_slice = &view.row(row);
+            let ptr = row_slice.as_ptr() as *const u8;
+            let len = row_slice.len();
+            let mut i = 0;
+
+            unsafe {
+                while i + LANES <= len {
+                    let chunk = &*(ptr.add(i) as *const [u8; LANES]);
+                    let vec = u8x32::from(*chunk);
+                    if vec.cmp_eq(ones).any() {
+                        break;
+                    }
+                    i += LANES;
+                }
+                while i < len {
+                    if *ptr.add(i) != 0 {
+                        found = i as isize;
+                        break;
+                    }
+                    i += 1;
+                }
+            }
+            result.push(found);
+        }
+    });
+
+    Ok(PyArray1::from_vec(py, result).to_owned())
+}
+
 
 //------------------------------------------------------------------------------
-
 
 #[pymodule]
 fn arrayredox(m: &Bound<'_, PyModule>) -> PyResult<()> {
