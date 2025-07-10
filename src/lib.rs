@@ -7,15 +7,17 @@ use wide::*;
 // use std::simd::Simd;
 // use std::simd::cmp::SimdPartialEq;
 
+use numpy::ndarray::{Array2, ArrayView2};
+use numpy::IntoPyArray;
 use numpy::PyArray1;
 use numpy::PyArrayMethods;
 use numpy::PyUntypedArrayMethods;
 use numpy::ToPyArray;
 use numpy::{PyArray2, PyReadonlyArray2};
-use numpy::IntoPyArray;
 
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
+use std::sync::Arc;
 
 #[pyfunction]
 fn first_true_1d_a(array: PyReadonlyArray1<bool>) -> isize {
@@ -393,32 +395,17 @@ fn first_true_1d(py: Python, array: PyReadonlyArray1<bool>, forward: bool) -> is
 //     }
 // }
 
-
-// use numpy::{PyReadonlyArray2, IntoPyArray, PyArray2};
-// use pyo3::prelude::*;
-
 pub struct PreparedBool2D<'py> {
-    pub data: &'py [u8],                   // flat contiguous buffer
-    pub nrows: usize,                      // number of logical rows
+    pub data: &'py [u8], // contiguous byte slice (bool as u8)
+    pub nrows: usize,
     pub ncols: usize,
-    _keepalive: Option<Bound<'py, PyAny>>,  // holds any copied/transposed buffer
+    _keepalive: Option<Arc<Array2<bool>>>, // holds owned data if needed
 }
 
 pub fn prepare_array_for_axis<'py>(
-    py: Python<'py>,
     array: PyReadonlyArray2<'py, bool>,
     axis: isize,
 ) -> PyResult<PreparedBool2D<'py>> {
-
-    // let shape = array.shape();
-    // let slice = array.as_slice().unwrap();
-    // return Ok(PreparedBool2D {
-    //     data: unsafe { std::mem::transmute(slice) }, // &[bool] → &[u8]
-    //     nrows: shape[0],
-    //     ncols: shape[1],
-    //     _keepalive: None,
-    // });
-
     if axis != 0 && axis != 1 {
         return Err(PyValueError::new_err("axis must be 0 or 1"));
     }
@@ -459,106 +446,23 @@ pub fn prepare_array_for_axis<'py>(
         }
     }
 
-    // Case 3: fallback — create a new C-contiguous owned array
-    let prepared_array: Bound<'py, PyArray2<bool>> = if axis == 0 {
-        array_view.reversed_axes().as_standard_layout().to_owned().to_pyarray(py)
+    // Case 3: fallback — make ndarray owned copy, but no PyArray!
+    let array_owned: Array2<bool> = if axis == 0 {
+        array_view.reversed_axes().as_standard_layout().to_owned()
     } else {
-        array_view.as_standard_layout().to_owned().to_pyarray(py)
+        array_view.as_standard_layout().to_owned()
     };
 
-    let array_view = unsafe { prepared_array.as_array() };
-    let prepared_slice = array_view
-            .as_slice_memory_order()
-            .expect("Newly allocated array must be contiguous");
+    let slice = array_owned
+        .as_slice_memory_order()
+        .expect("newly allocated Array2 must be contiguous");
 
     Ok(PreparedBool2D {
-        data: unsafe { std::mem::transmute(prepared_slice) },
+        data: unsafe { std::mem::transmute(slice) },
         nrows,
         ncols,
-        _keepalive: Some(prepared_array.into_any()),
+        _keepalive: Some(Arc::new(array_owned)),
     })
-}
-
-
-
-#[pyfunction]
-#[pyo3(signature = (array, *, forward=true, axis))]
-pub fn first_true_2d_a<'py>(
-    py: Python<'py>,
-    array: PyReadonlyArray2<'py, bool>,
-    forward: bool,
-    axis: isize,
-) -> PyResult<Bound<'py, PyArray1<isize>>> {
-
-    let prepared = prepare_array_for_axis(py, array, axis)?;
-    let data = prepared.data;
-    let rows = prepared.nrows;
-    let row_len = prepared.ncols;
-
-    let mut result = vec![-1isize; rows];
-
-    py.allow_threads(|| {
-        const LANES: usize = 32;
-        let ones = u8x32::splat(1);
-        let base_ptr = data.as_ptr();
-
-        for row in 0..rows {
-            let ptr = unsafe { base_ptr.add(row * row_len) };
-            if forward {
-                // Forward search
-                let mut i = 0;
-                unsafe {
-                    while i + LANES <= row_len {
-                        let chunk = &*(ptr.add(i) as *const [u8; LANES]);
-                        let vec = u8x32::from(*chunk);
-                        if vec.cmp_eq(ones).any() {
-                            break;
-                        }
-                        i += LANES;
-                    }
-                    while i < row_len {
-                        if *ptr.add(i) != 0 {
-                            result[row] = i as isize;
-                            break;
-                        }
-                        i += 1;
-                    }
-                }
-            } else {
-                // Backward search
-                let mut i = row_len;
-                unsafe {
-                    // Process LANES bytes at a time with SIMD (backwards)
-                    while i >= LANES {
-                        i -= LANES;
-
-                        let chunk = &*(ptr.add(i) as *const [u8; LANES]);
-                        let vec = u8x32::from(*chunk);
-                        if vec.cmp_eq(ones).any() {
-                            // Found a true in this chunk, search backwards within it
-                            for j in (i..i + LANES).rev() {
-                                if *ptr.add(j) != 0 {
-                                    result[row] = j as isize;
-                                    break;
-                                }
-                            }
-                            break;
-                        }
-                    }
-                    // Handle remaining bytes at the beginning
-                    if i > 0 && i < LANES {
-                        for j in (0..i).rev() {
-                            if *ptr.add(j) != 0 {
-                                result[row] = j as isize;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    });
-    Ok(PyArray1::from_vec(py, result).to_owned())
 }
 
 #[pyfunction]
@@ -569,7 +473,95 @@ pub fn first_true_2d<'py>(
     forward: bool,
     axis: isize,
 ) -> PyResult<Bound<'py, PyArray1<isize>>> {
-    let prepared = prepare_array_for_axis(py, array, axis)?;
+    let prepared = prepare_array_for_axis(array, axis)?;
+    let data = prepared.data;
+    let rows = prepared.nrows;
+    let row_len = prepared.ncols;
+
+    let pyarray = unsafe { PyArray1::<isize>::new(py, [rows], false) };
+    let result = unsafe { pyarray.as_slice_mut().unwrap() };
+    result.fill(-1);
+
+    // let mut result = vec![-1isize; rows];
+
+    // py.allow_threads(|| {
+    const LANES: usize = 32;
+    let ones = u8x32::splat(1);
+    let base_ptr = data.as_ptr();
+    let mut i;
+
+    if forward {
+        for row in 0..rows {
+            let ptr = unsafe { base_ptr.add(row * row_len) };
+            i = 0;
+            unsafe {
+                while i + LANES <= row_len {
+                    let chunk = &*(ptr.add(i) as *const [u8; LANES]);
+                    let vec = u8x32::from(*chunk);
+                    if vec.cmp_eq(ones).any() {
+                        break;
+                    }
+                    i += LANES;
+                }
+                while i < row_len {
+                    if *ptr.add(i) != 0 {
+                        result[row] = i as isize;
+                        break;
+                    }
+                    i += 1;
+                }
+            }
+        }
+    } else {
+        // Backward search
+        for row in 0..rows {
+            let ptr = unsafe { base_ptr.add(row * row_len) };
+
+            i = row_len;
+            unsafe {
+                // Process LANES bytes at a time with SIMD (backwards)
+                while i >= LANES {
+                    i -= LANES;
+
+                    let chunk = &*(ptr.add(i) as *const [u8; LANES]);
+                    let vec = u8x32::from(*chunk);
+                    if vec.cmp_eq(ones).any() {
+                        // Found a true in this chunk, search backwards within it
+                        for j in (i..i + LANES).rev() {
+                            if *ptr.add(j) != 0 {
+                                result[row] = j as isize;
+                                break;
+                            }
+                        }
+                        break;
+                    }
+                }
+                // Handle remaining bytes at the beginning
+                if i > 0 && i < LANES {
+                    for j in (0..i).rev() {
+                        if *ptr.add(j) != 0 {
+                            result[row] = j as isize;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // });
+    // Ok(PyArray1::from_vec(py, result).to_owned())
+    Ok(pyarray)
+}
+
+#[pyfunction]
+#[pyo3(signature = (array, *, forward=true, axis))]
+pub fn first_true_2d_b<'py>(
+    py: Python<'py>,
+    array: PyReadonlyArray2<'py, bool>,
+    forward: bool,
+    axis: isize,
+) -> PyResult<Bound<'py, PyArray1<isize>>> {
+    let prepared = prepare_array_for_axis(array, axis)?;
     let data = prepared.data;
     let rows = prepared.nrows;
     let row_len = prepared.ncols;
@@ -580,9 +572,9 @@ pub fn first_true_2d<'py>(
     let max_threads = if rows < 100 {
         1
     } else if rows < 1000 {
-        2
+        1
     } else if rows < 10000 {
-        4
+        1
     } else {
         16
     };
@@ -666,8 +658,6 @@ pub fn first_true_2d<'py>(
 
     Ok(PyArray1::from_vec(py, result))
 }
-
-
 
 //------------------------------------------------------------------------------
 
