@@ -12,6 +12,7 @@ crate-type = ["cdylib"]
 pyo3 = "0.25.0"
 numpy = "0.25.0"
 wide = "0.7.33"
+rayon = "1.10.0"
 
 
 [profile.release]

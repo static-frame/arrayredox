@@ -14,6 +14,9 @@ use numpy::ToPyArray;
 use numpy::{PyArray2, PyReadonlyArray2};
 use numpy::IntoPyArray;
 
+use rayon::prelude::*;
+use rayon::ThreadPoolBuilder;
+
 #[pyfunction]
 fn first_true_1d_a(array: PyReadonlyArray1<bool>) -> isize {
     match array.as_slice() {
@@ -480,7 +483,7 @@ pub fn prepare_array_for_axis<'py>(
 
 #[pyfunction]
 #[pyo3(signature = (array, *, forward=true, axis))]
-pub fn first_true_2d<'py>(
+pub fn first_true_2d_a<'py>(
     py: Python<'py>,
     array: PyReadonlyArray2<'py, bool>,
     forward: bool,
@@ -557,6 +560,114 @@ pub fn first_true_2d<'py>(
     });
     Ok(PyArray1::from_vec(py, result).to_owned())
 }
+
+#[pyfunction]
+#[pyo3(signature = (array, *, forward=true, axis))]
+pub fn first_true_2d<'py>(
+    py: Python<'py>,
+    array: PyReadonlyArray2<'py, bool>,
+    forward: bool,
+    axis: isize,
+) -> PyResult<Bound<'py, PyArray1<isize>>> {
+    let prepared = prepare_array_for_axis(py, array, axis)?;
+    let data = prepared.data;
+    let rows = prepared.nrows;
+    let row_len = prepared.ncols;
+
+    let mut result = vec![-1isize; rows];
+
+    // Dynamically select thread count
+    let max_threads = if rows < 100 {
+        1
+    } else if rows < 1000 {
+        2
+    } else if rows < 10000 {
+        4
+    } else {
+        16
+    };
+
+    py.allow_threads(|| {
+        let base_ptr = data.as_ptr() as usize;
+        const LANES: usize = 32;
+        let ones = u8x32::splat(1);
+
+        let process_row = |row: usize| -> isize {
+            let ptr = (base_ptr + row * row_len) as *const u8;
+            let mut found = -1isize;
+
+            unsafe {
+                if forward {
+                    let mut i = 0;
+                    while i + LANES <= row_len {
+                        let chunk = &*(ptr.add(i) as *const [u8; LANES]);
+                        let vec = u8x32::from(*chunk);
+                        if vec.cmp_eq(ones).any() {
+                            break;
+                        }
+                        i += LANES;
+                    }
+                    while i < row_len {
+                        if *ptr.add(i) != 0 {
+                            found = i as isize;
+                            break;
+                        }
+                        i += 1;
+                    }
+                } else {
+                    let mut i = row_len;
+                    while i >= LANES {
+                        i -= LANES;
+                        let chunk = &*(ptr.add(i) as *const [u8; LANES]);
+                        let vec = u8x32::from(*chunk);
+                        if vec.cmp_eq(ones).any() {
+                            for j in (i..i + LANES).rev() {
+                                if *ptr.add(j) != 0 {
+                                    found = j as isize;
+                                    break;
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    if i > 0 && i < LANES {
+                        for j in (0..i).rev() {
+                            if *ptr.add(j) != 0 {
+                                found = j as isize;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            found
+        };
+
+        if max_threads == 1 {
+            // Single-threaded path
+            for row in 0..rows {
+                result[row] = process_row(row);
+            }
+        } else {
+            // Multi-threaded path with Rayon
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(max_threads)
+                .build()
+                .unwrap();
+
+            pool.install(|| {
+                result.par_iter_mut().enumerate().for_each(|(row, out)| {
+                    *out = process_row(row);
+                });
+            });
+        }
+    });
+
+    Ok(PyArray1::from_vec(py, result))
+}
+
+
 
 //------------------------------------------------------------------------------
 
