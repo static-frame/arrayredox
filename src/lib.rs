@@ -406,6 +406,16 @@ pub fn prepare_array_for_axis<'py>(
     array: PyReadonlyArray2<'py, bool>,
     axis: isize,
 ) -> PyResult<PreparedBool2D<'py>> {
+
+    // let shape = array.shape();
+    // let slice = array.as_slice().unwrap();
+    // return Ok(PreparedBool2D {
+    //     data: unsafe { std::mem::transmute(slice) }, // &[bool] → &[u8]
+    //     nrows: shape[0],
+    //     ncols: shape[1],
+    //     _keepalive: None,
+    // });
+
     if axis != 0 && axis != 1 {
         return Err(PyValueError::new_err("axis must be 0 or 1"));
     }
