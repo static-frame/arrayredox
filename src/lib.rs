@@ -487,11 +487,6 @@ pub fn first_true_2d<'py>(
     axis: isize,
 ) -> PyResult<Bound<'py, PyArray1<isize>>> {
 
-    // let prepped = prepare_array_for_axis(py, array, axis)?;
-    // let view = unsafe { prepped.as_array() };
-    // // NOTE: these are rows in the view, not always the same as rows
-    // let rows = view.nrows();
-
     let prepared = prepare_array_for_axis(py, array, axis)?;
     let data = prepared.data;
     let rows = prepared.nrows;
@@ -502,18 +497,10 @@ pub fn first_true_2d<'py>(
     py.allow_threads(|| {
         const LANES: usize = 32;
         let ones = u8x32::splat(1);
-
         let base_ptr = data.as_ptr();
 
         for row in 0..rows {
-
             let ptr = unsafe { base_ptr.add(row * row_len) };
-
-            // let mut found = -1;
-            // let row_slice = &view.row(row);
-            // let ptr = row_slice.as_ptr() as *const u8;
-            // let len = row_slice.len();
-
             if forward {
                 // Forward search
                 let mut i = 0;
@@ -528,7 +515,6 @@ pub fn first_true_2d<'py>(
                     }
                     while i < row_len {
                         if *ptr.add(i) != 0 {
-                            // found = i as isize;
                             result[row] = i as isize;
                             break;
                         }
@@ -542,13 +528,13 @@ pub fn first_true_2d<'py>(
                     // Process LANES bytes at a time with SIMD (backwards)
                     while i >= LANES {
                         i -= LANES;
+
                         let chunk = &*(ptr.add(i) as *const [u8; LANES]);
                         let vec = u8x32::from(*chunk);
                         if vec.cmp_eq(ones).any() {
                             // Found a true in this chunk, search backwards within it
                             for j in (i..i + LANES).rev() {
                                 if *ptr.add(j) != 0 {
-                                    // found = j as isize;
                                     result[row] = j as isize;
                                     break;
                                 }
@@ -560,7 +546,6 @@ pub fn first_true_2d<'py>(
                     if i > 0 && i < LANES {
                         for j in (0..i).rev() {
                             if *ptr.add(j) != 0 {
-                                // found = j as isize;
                                 result[row] = j as isize;
                                 break;
                             }
@@ -570,7 +555,6 @@ pub fn first_true_2d<'py>(
             }
         }
     });
-
     Ok(PyArray1::from_vec(py, result).to_owned())
 }
 
