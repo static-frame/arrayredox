@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "arrayredox"
-description = "Array utilities for StaticFrame"
+description = "Array utilities"
 requires-python = ">=3.10"
 readme = { file = "README.md", content-type = "text/x-md" }
 license = { text = "MIT" }
