@@ -12,7 +12,7 @@ authors = [
     { name = "Christopher Ariza" },
 ]
 urls = {
-    Homepage = "https://github.com/static-frame/arrayredox"
+    "Homepage" = "https://github.com/static-frame/arrayredox"
 }
 classifiers = [
     "Programming Language :: Rust",
