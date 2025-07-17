@@ -11,9 +11,8 @@ license = { text = "MIT" }
 authors = [
     { name = "Christopher Ariza" },
 ]
-urls = {
-    "Homepage" = "https://github.com/static-frame/arrayredox"
-}
+urls = { "Homepage" = "https://github.com/static-frame/arrayredox" }
+
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
