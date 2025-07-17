@@ -7,16 +7,14 @@ use wide::*;
 // use std::simd::Simd;
 // use std::simd::cmp::SimdPartialEq;
 
-use numpy::ndarray::{Array2, ArrayView2};
-use numpy::IntoPyArray;
+use numpy::ndarray::Array2;
 use numpy::PyArray1;
 use numpy::PyArrayMethods;
+use numpy::PyReadonlyArray2;
 use numpy::PyUntypedArrayMethods;
-use numpy::ToPyArray;
-use numpy::{PyArray2, PyReadonlyArray2};
 
-use rayon::prelude::*;
-use rayon::ThreadPoolBuilder;
+// use rayon::prelude::*;
+// use rayon::ThreadPoolBuilder;
 use std::sync::Arc;
 
 #[pyfunction]
@@ -425,7 +423,7 @@ pub fn prepare_array_for_axis<'py>(
     if is_c && axis == 1 {
         if let Ok(slice) = array.as_slice() {
             return Ok(PreparedBool2D {
-                data: unsafe { std::mem::transmute(slice) }, // &[bool] → &[u8]
+                data: unsafe { std::mem::transmute::<&[bool], &[u8]>(slice) }, // &[bool] → &[u8]
                 nrows,
                 ncols,
                 _keepalive: None,
@@ -438,7 +436,7 @@ pub fn prepare_array_for_axis<'py>(
         let transposed = array_view.reversed_axes();
         if let Some(slice) = transposed.as_standard_layout().as_slice_memory_order() {
             return Ok(PreparedBool2D {
-                data: unsafe { std::mem::transmute(slice) },
+                data: unsafe { std::mem::transmute::<&[bool], &[u8]>(slice) },
                 nrows,
                 ncols,
                 _keepalive: None,
@@ -458,7 +456,7 @@ pub fn prepare_array_for_axis<'py>(
         .expect("newly allocated Array2 must be contiguous");
 
     Ok(PreparedBool2D {
-        data: unsafe { std::mem::transmute(slice) },
+        data: unsafe { std::mem::transmute::<&[bool], &[u8]>(slice) },
         nrows,
         ncols,
         _keepalive: Some(Arc::new(array_owned)),
@@ -491,6 +489,7 @@ pub fn first_true_2d<'py>(
     let mut i;
 
     if forward {
+        #[allow(clippy::needless_range_loop)]
         for row in 0..rows {
             let ptr = unsafe { base_ptr.add(row * row_len) };
             i = 0;
@@ -514,6 +513,7 @@ pub fn first_true_2d<'py>(
         }
     } else {
         // Backward search
+        #[allow(clippy::needless_range_loop)]
         for row in 0..rows {
             let ptr = unsafe { base_ptr.add(row * row_len) };
 
@@ -553,111 +553,111 @@ pub fn first_true_2d<'py>(
     Ok(pyarray)
 }
 
-#[pyfunction]
-#[pyo3(signature = (array, *, forward=true, axis))]
-pub fn first_true_2d_b<'py>(
-    py: Python<'py>,
-    array: PyReadonlyArray2<'py, bool>,
-    forward: bool,
-    axis: isize,
-) -> PyResult<Bound<'py, PyArray1<isize>>> {
-    let prepared = prepare_array_for_axis(array, axis)?;
-    let data = prepared.data;
-    let rows = prepared.nrows;
-    let row_len = prepared.ncols;
+// #[pyfunction]
+// #[pyo3(signature = (array, *, forward=true, axis))]
+// pub fn first_true_2d_b<'py>(
+//     py: Python<'py>,
+//     array: PyReadonlyArray2<'py, bool>,
+//     forward: bool,
+//     axis: isize,
+// ) -> PyResult<Bound<'py, PyArray1<isize>>> {
+//     let prepared = prepare_array_for_axis(array, axis)?;
+//     let data = prepared.data;
+//     let rows = prepared.nrows;
+//     let row_len = prepared.ncols;
 
-    let mut result = vec![-1isize; rows];
+//     let mut result = vec![-1isize; rows];
 
-    // Dynamically select thread count
-    let max_threads = if rows < 100 {
-        1
-    } else if rows < 1000 {
-        1
-    } else if rows < 10000 {
-        1
-    } else {
-        16
-    };
+//     // Dynamically select thread count
+//     let max_threads = if rows < 100 {
+//         1
+//     } else if rows < 1000 {
+//         1
+//     } else if rows < 10000 {
+//         1
+//     } else {
+//         16
+//     };
 
-    py.allow_threads(|| {
-        let base_ptr = data.as_ptr() as usize;
-        const LANES: usize = 32;
-        let ones = u8x32::splat(1);
+//     py.allow_threads(|| {
+//         let base_ptr = data.as_ptr() as usize;
+//         const LANES: usize = 32;
+//         let ones = u8x32::splat(1);
 
-        let process_row = |row: usize| -> isize {
-            let ptr = (base_ptr + row * row_len) as *const u8;
-            let mut found = -1isize;
+//         let process_row = |row: usize| -> isize {
+//             let ptr = (base_ptr + row * row_len) as *const u8;
+//             let mut found = -1isize;
 
-            unsafe {
-                if forward {
-                    let mut i = 0;
-                    while i + LANES <= row_len {
-                        let chunk = &*(ptr.add(i) as *const [u8; LANES]);
-                        let vec = u8x32::from(*chunk);
-                        if vec.cmp_eq(ones).any() {
-                            break;
-                        }
-                        i += LANES;
-                    }
-                    while i < row_len {
-                        if *ptr.add(i) != 0 {
-                            found = i as isize;
-                            break;
-                        }
-                        i += 1;
-                    }
-                } else {
-                    let mut i = row_len;
-                    while i >= LANES {
-                        i -= LANES;
-                        let chunk = &*(ptr.add(i) as *const [u8; LANES]);
-                        let vec = u8x32::from(*chunk);
-                        if vec.cmp_eq(ones).any() {
-                            for j in (i..i + LANES).rev() {
-                                if *ptr.add(j) != 0 {
-                                    found = j as isize;
-                                    break;
-                                }
-                            }
-                            break;
-                        }
-                    }
-                    if i > 0 && i < LANES {
-                        for j in (0..i).rev() {
-                            if *ptr.add(j) != 0 {
-                                found = j as isize;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
+//             unsafe {
+//                 if forward {
+//                     let mut i = 0;
+//                     while i + LANES <= row_len {
+//                         let chunk = &*(ptr.add(i) as *const [u8; LANES]);
+//                         let vec = u8x32::from(*chunk);
+//                         if vec.cmp_eq(ones).any() {
+//                             break;
+//                         }
+//                         i += LANES;
+//                     }
+//                     while i < row_len {
+//                         if *ptr.add(i) != 0 {
+//                             found = i as isize;
+//                             break;
+//                         }
+//                         i += 1;
+//                     }
+//                 } else {
+//                     let mut i = row_len;
+//                     while i >= LANES {
+//                         i -= LANES;
+//                         let chunk = &*(ptr.add(i) as *const [u8; LANES]);
+//                         let vec = u8x32::from(*chunk);
+//                         if vec.cmp_eq(ones).any() {
+//                             for j in (i..i + LANES).rev() {
+//                                 if *ptr.add(j) != 0 {
+//                                     found = j as isize;
+//                                     break;
+//                                 }
+//                             }
+//                             break;
+//                         }
+//                     }
+//                     if i > 0 && i < LANES {
+//                         for j in (0..i).rev() {
+//                             if *ptr.add(j) != 0 {
+//                                 found = j as isize;
+//                                 break;
+//                             }
+//                         }
+//                     }
+//                 }
+//             }
 
-            found
-        };
+//             found
+//         };
 
-        if max_threads == 1 {
-            // Single-threaded path
-            for row in 0..rows {
-                result[row] = process_row(row);
-            }
-        } else {
-            // Multi-threaded path with Rayon
-            let pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(max_threads)
-                .build()
-                .unwrap();
+//         if max_threads == 1 {
+//             // Single-threaded path
+//             for row in 0..rows {
+//                 result[row] = process_row(row);
+//             }
+//         } else {
+//             // Multi-threaded path with Rayon
+//             let pool = rayon::ThreadPoolBuilder::new()
+//                 .num_threads(max_threads)
+//                 .build()
+//                 .unwrap();
 
-            pool.install(|| {
-                result.par_iter_mut().enumerate().for_each(|(row, out)| {
-                    *out = process_row(row);
-                });
-            });
-        }
-    });
+//             pool.install(|| {
+//                 result.par_iter_mut().enumerate().for_each(|(row, out)| {
+//                     *out = process_row(row);
+//                 });
+//             });
+//         }
+//     });
 
-    Ok(PyArray1::from_vec(py, result))
-}
+//     Ok(PyArray1::from_vec(py, result))
+// }
 
 //------------------------------------------------------------------------------
 
