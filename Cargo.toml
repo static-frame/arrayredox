@@ -25,5 +25,5 @@ opt-level = 3
 lto = "fat"
 codegen-units = 1
 
-[build]
-rustflags = ["-C", "target-cpu=native"]
+# [build]
+# rustflags = ["-C", "target-cpu=native"]

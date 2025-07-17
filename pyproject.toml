@@ -4,12 +4,36 @@ build-backend = "maturin"
 
 [project]
 name = "arrayredox"
-requires-python = ">=3.8"
+description = "Array utilities for StaticFrame"
+requires-python = ">=3.10"
+readme = { file = "README.md", content-type = "text/x-md" }
+license = { text = "MIT" }
+authors = [
+    { name = "Christopher Ariza" },
+]
+urls = {
+    Homepage = "https://github.com/static-frame/arrayredox"
+}
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
+    'Development Status :: 5 - Production/Stable',
+    'Intended Audience :: Developers',
+    'Topic :: Software Development',
+    'License :: OSI Approved :: MIT License',
+    'Operating System :: MacOS :: MacOS X',
+    'Operating System :: Microsoft :: Windows',
+    'Operating System :: POSIX',
+    'Programming Language :: Python :: 3.10',
+    'Programming Language :: Python :: 3.11',
+    'Programming Language :: Python :: 3.12',
+    'Programming Language :: Python :: 3.13',
 ]
 dynamic = ["version"]
+
+[project.optional-dependencies]
+dev = ["pytest", "numpy"]
+
 [tool.maturin]
 features = ["pyo3/extension-module"]
