@@ -13,8 +13,7 @@ use numpy::PyArrayMethods;
 use numpy::PyReadonlyArray2;
 use numpy::PyUntypedArrayMethods;
 
-// use rayon::prelude::*;
-// use rayon::ThreadPoolBuilder;
+use rayon::prelude::*;
 use std::sync::Arc;
 
 #[pyfunction]
@@ -350,49 +349,6 @@ fn first_true_1d(py: Python, array: PyReadonlyArray1<bool>, forward: bool) -> is
 //     axis == 0: transpose, copy to C
 //     axis == 1: copy to C
 
-// fn prepare_array_for_axis<'py>(
-//     py: Python<'py>,
-//     array: PyReadonlyArray2<'py, bool>,
-//     axis: isize,
-// ) -> PyResult<Bound<'py, PyArray2<bool>>> {
-//     if axis != 0 && axis != 1 {
-//         return Err(PyValueError::new_err("axis must be 0 or 1"));
-//     }
-
-//     let is_c = array.is_c_contiguous();
-//     let is_f = array.is_fortran_contiguous();
-//     let array_view = array.as_array();
-
-//     match (is_c, is_f, axis) {
-//         (true, _, 1) => {
-//             // Already C-contiguous, no copy needed
-//             Ok(array_view.to_pyarray(py).to_owned())
-//         }
-//         (_, true, 0) => {
-//             // F-contiguous original -> transposed will be C-contiguous, no copy needed
-//             Ok(array_view.reversed_axes().to_pyarray(py).to_owned())
-//         }
-//         (_, true, 1) => {
-//             // F-contiguous, need to copy to C-contiguous
-//             let contiguous = array_view.as_standard_layout();
-//             Ok(contiguous.to_pyarray(py).to_owned())
-//         }
-//         (_, _, 1) => {
-//             // Neither C nor F contiguous, need to copy
-//             let contiguous = array_view.as_standard_layout();
-//             Ok(contiguous.to_pyarray(py).to_owned())
-//         }
-
-//         (true, _, 0) | (_, _, 0) => {
-//             // C-contiguous or neither -> transposed won't be C-contiguous, need copy
-//             let transposed = array_view.reversed_axes();
-//             let contiguous = transposed.as_standard_layout();
-//             Ok(contiguous.to_pyarray(py).to_owned())
-//         }
-//         _ => unreachable!(),
-//     }
-// }
-
 pub struct PreparedBool2D<'py> {
     pub data: &'py [u8], // contiguous byte slice (bool as u8)
     pub nrows: usize,
@@ -462,6 +418,10 @@ pub fn prepare_array_for_axis<'py>(
         _keepalive: Some(Arc::new(array_owned)),
     })
 }
+
+
+
+
 
 #[pyfunction]
 #[pyo3(signature = (array, *, forward=true, axis))]
@@ -553,111 +513,115 @@ pub fn first_true_2d<'py>(
     Ok(pyarray)
 }
 
-// #[pyfunction]
-// #[pyo3(signature = (array, *, forward=true, axis))]
-// pub fn first_true_2d_b<'py>(
-//     py: Python<'py>,
-//     array: PyReadonlyArray2<'py, bool>,
-//     forward: bool,
-//     axis: isize,
-// ) -> PyResult<Bound<'py, PyArray1<isize>>> {
-//     let prepared = prepare_array_for_axis(array, axis)?;
-//     let data = prepared.data;
-//     let rows = prepared.nrows;
-//     let row_len = prepared.ncols;
 
-//     let mut result = vec![-1isize; rows];
+#[pyfunction]
+#[pyo3(signature = (array, *, forward=true, axis))]
+pub fn first_true_2d_b<'py>(
+    py: Python<'py>,
+    array: PyReadonlyArray2<'py, bool>,
+    forward: bool,
+    axis: isize,
+) -> PyResult<Bound<'py, PyArray1<isize>>> {
+    let prepared = prepare_array_for_axis(array, axis)?;
+    let data = prepared.data;
+    let rows = prepared.nrows;
+    let row_len = prepared.ncols;
 
-//     // Dynamically select thread count
-//     let max_threads = if rows < 100 {
-//         1
-//     } else if rows < 1000 {
-//         1
-//     } else if rows < 10000 {
-//         1
-//     } else {
-//         16
-//     };
+    let mut result = vec![-1isize; rows];
 
-//     py.allow_threads(|| {
-//         let base_ptr = data.as_ptr() as usize;
-//         const LANES: usize = 32;
-//         let ones = u8x32::splat(1);
+    // Dynamically select thread count
+    let max_threads = if rows < 100 {
+        2
+    } else if rows < 1000 {
+        4
+    } else if rows < 10000 {
+        8
+    } else {
+        16
+    };
 
-//         let process_row = |row: usize| -> isize {
-//             let ptr = (base_ptr + row * row_len) as *const u8;
-//             let mut found = -1isize;
+    py.allow_threads(|| {
+        let base_ptr = data.as_ptr() as usize;
+        const LANES: usize = 32;
+        let ones = u8x32::splat(1);
 
-//             unsafe {
-//                 if forward {
-//                     let mut i = 0;
-//                     while i + LANES <= row_len {
-//                         let chunk = &*(ptr.add(i) as *const [u8; LANES]);
-//                         let vec = u8x32::from(*chunk);
-//                         if vec.cmp_eq(ones).any() {
-//                             break;
-//                         }
-//                         i += LANES;
-//                     }
-//                     while i < row_len {
-//                         if *ptr.add(i) != 0 {
-//                             found = i as isize;
-//                             break;
-//                         }
-//                         i += 1;
-//                     }
-//                 } else {
-//                     let mut i = row_len;
-//                     while i >= LANES {
-//                         i -= LANES;
-//                         let chunk = &*(ptr.add(i) as *const [u8; LANES]);
-//                         let vec = u8x32::from(*chunk);
-//                         if vec.cmp_eq(ones).any() {
-//                             for j in (i..i + LANES).rev() {
-//                                 if *ptr.add(j) != 0 {
-//                                     found = j as isize;
-//                                     break;
-//                                 }
-//                             }
-//                             break;
-//                         }
-//                     }
-//                     if i > 0 && i < LANES {
-//                         for j in (0..i).rev() {
-//                             if *ptr.add(j) != 0 {
-//                                 found = j as isize;
-//                                 break;
-//                             }
-//                         }
-//                     }
-//                 }
-//             }
+        let process_row = |row: usize| -> isize {
+            let ptr = (base_ptr + row * row_len) as *const u8;
+            let mut found = -1isize;
 
-//             found
-//         };
+            unsafe {
+                if forward {
+                    let mut i = 0;
+                    while i + LANES <= row_len {
+                        let chunk = &*(ptr.add(i) as *const [u8; LANES]);
+                        let vec = u8x32::from(*chunk);
+                        if vec.cmp_eq(ones).any() {
+                            break;
+                        }
+                        i += LANES;
+                    }
+                    while i < row_len {
+                        if *ptr.add(i) != 0 {
+                            found = i as isize;
+                            break;
+                        }
+                        i += 1;
+                    }
+                } else {
+                    let mut i = row_len;
+                    while i >= LANES {
+                        i -= LANES;
+                        let chunk = &*(ptr.add(i) as *const [u8; LANES]);
+                        let vec = u8x32::from(*chunk);
+                        if vec.cmp_eq(ones).any() {
+                            for j in (i..i + LANES).rev() {
+                                if *ptr.add(j) != 0 {
+                                    found = j as isize;
+                                    break;
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    if i > 0 && i < LANES {
+                        for j in (0..i).rev() {
+                            if *ptr.add(j) != 0 {
+                                found = j as isize;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
 
-//         if max_threads == 1 {
-//             // Single-threaded path
-//             for row in 0..rows {
-//                 result[row] = process_row(row);
-//             }
-//         } else {
-//             // Multi-threaded path with Rayon
-//             let pool = rayon::ThreadPoolBuilder::new()
-//                 .num_threads(max_threads)
-//                 .build()
-//                 .unwrap();
+            found
+        };
 
-//             pool.install(|| {
-//                 result.par_iter_mut().enumerate().for_each(|(row, out)| {
-//                     *out = process_row(row);
-//                 });
-//             });
-//         }
-//     });
+        if max_threads == 1 {
+            // Single-threaded path
+            for row in 0..rows {
+                result[row] = process_row(row);
+            }
+        } else {
+            // Multi-threaded path with Rayon
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(max_threads)
+                .build()
+                .unwrap();
 
-//     Ok(PyArray1::from_vec(py, result))
-// }
+            pool.install(|| {
+                result.par_iter_mut().enumerate().for_each(|(row, out)| {
+                    *out = process_row(row);
+                });
+            });
+        }
+    });
+
+    Ok(PyArray1::from_vec(py, result))
+}
+
+
+
 
 //------------------------------------------------------------------------------
 
@@ -671,5 +635,6 @@ fn arrayredox(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // m.add_function(wrap_pyfunction!(first_true_1d_g, m)?)?;
     m.add_function(wrap_pyfunction!(first_true_1d, m)?)?;
     m.add_function(wrap_pyfunction!(first_true_2d, m)?)?;
+    m.add_function(wrap_pyfunction!(first_true_2d_b, m)?)?;
     Ok(())
 }
