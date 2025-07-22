@@ -8,7 +8,9 @@ import typing as tp
 from itertools import repeat
 
 from arraykit import first_true_2d as ak_first_true_2d
-from arrayredox import first_true_2d as ar_first_true_2d
+from arrayredox import first_true_2d as ar_first_true_2d_a
+from arrayredox import first_true_2d_b as ar_first_true_2d_b
+
 import arraykit as ak
 
 import matplotlib.pyplot as plt
@@ -58,33 +60,64 @@ class AKFirstTrueAxis1Reverse(ArrayProcessor):
 
 
 #-------------------------------------------------------------------------------
-class ARFirstTrueAxis0Forward(ArrayProcessor):
-    NAME = 'ar.first_true_2d(forward=True, axis=0)'
+class ARFirstTrueAAxis0Forward(ArrayProcessor):
+    NAME = 'ar.first_true_2d_a(forward=True, axis=0)'
     SORT = 10
 
     def __call__(self):
-        _ = ar_first_true_2d(self.array, forward=True, axis=0)
+        _ = ar_first_true_2d_a(self.array, forward=True, axis=0)
 
-class ARFirstTrueAxis1Forward(ArrayProcessor):
-    NAME = 'ar.first_true_2d(forward=True, axis=1)'
+class ARFirstTrueAAxis1Forward(ArrayProcessor):
+    NAME = 'ar.first_true_2d_a(forward=True, axis=1)'
     SORT = 11
 
     def __call__(self):
-        _ = ar_first_true_2d(self.array, forward=True, axis=1)
+        _ = ar_first_true_2d_a(self.array, forward=True, axis=1)
 
-class ARFirstTrueAxis0Reverse(ArrayProcessor):
-    NAME = 'ar.first_true_2d(forward=False, axis=0)'
+class ARFirstTrueAAxis0Reverse(ArrayProcessor):
+    NAME = 'ar.first_true_2d_a(forward=False, axis=0)'
     SORT = 12
 
     def __call__(self):
-        _ = ar_first_true_2d(self.array, forward=False, axis=0)
+        _ = ar_first_true_2d_a(self.array, forward=False, axis=0)
 
-class ARFirstTrueAxis1Reverse(ArrayProcessor):
-    NAME = 'ar.first_true_2d(forward=False, axis=1)'
+class ARFirstTrueAAxis1Reverse(ArrayProcessor):
+    NAME = 'ar.first_true_2d_a(forward=False, axis=1)'
     SORT = 13
 
     def __call__(self):
-        _ = ar_first_true_2d(self.array, forward=False, axis=1)
+        _ = ar_first_true_2d_a(self.array, forward=False, axis=1)
+
+#-------------------------------------------------------------------------------
+class ARFirstTrueBAxis0Forward(ArrayProcessor):
+    NAME = 'ar.first_true_2d_b(forward=True, axis=0)'
+    SORT = 20
+
+    def __call__(self):
+
+        _ = ar_first_true_2d_b(self.array, forward=True, axis=0)
+
+class ARFirstTrueBAxis1Forward(ArrayProcessor):
+    NAME = 'ar.first_true_2d_b(forward=True, axis=1)'
+    SORT = 21
+
+    def __call__(self):
+        _ = ar_first_true_2d_b(self.array, forward=True, axis=1)
+
+class ARFirstTrueBAxis0Reverse(ArrayProcessor):
+    NAME = 'ar.first_true_2d_b(forward=False, axis=0)'
+    SORT = 22
+
+    def __call__(self):
+        _ = ar_first_true_2d_b(self.array, forward=False, axis=0)
+
+class ARFirstTrueBAxis1Reverse(ArrayProcessor):
+    NAME = 'ar.first_true_2d_b(forward=False, axis=1)'
+    SORT = 23
+
+    def __call__(self):
+        _ = ar_first_true_2d_b(self.array, forward=False, axis=1)
+
 
 
 #-------------------------------------------------------------------------------
@@ -92,7 +125,7 @@ class ARFirstTrueAxis1Reverse(ArrayProcessor):
 
 class NPNonZero(ArrayProcessor):
     NAME = 'np.nonzero()'
-    SORT = 3
+    SORT = 33
 
     def __call__(self):
         x, y = np.nonzero(self.array)
@@ -101,7 +134,7 @@ class NPNonZero(ArrayProcessor):
 
 class NPArgMaxAxis0(ArrayProcessor):
     NAME = 'np.any(axis=0), np.argmax(axis=0)'
-    SORT = 4
+    SORT = 34
 
     def __call__(self):
         _ = ~np.any(self.array, axis=0)
@@ -109,7 +142,7 @@ class NPArgMaxAxis0(ArrayProcessor):
 
 class NPArgMaxAxis1(ArrayProcessor):
     NAME = 'np.any(axis=1), np.argmax(axis=1)'
-    SORT = 4
+    SORT = 35
 
     def __call__(self):
         _ = ~np.any(self.array, axis=1)
@@ -303,14 +336,20 @@ CLS_PROCESSOR = (
     AKFirstTrueAxis0Reverse,
     AKFirstTrueAxis1Reverse,
 
-    ARFirstTrueAxis0Forward,
-    ARFirstTrueAxis1Forward,
-    ARFirstTrueAxis0Reverse,
-    ARFirstTrueAxis1Reverse,
+    ARFirstTrueAAxis0Forward,
+    ARFirstTrueAAxis1Forward,
+    ARFirstTrueAAxis0Reverse,
+    ARFirstTrueAAxis1Reverse,
+
+    ARFirstTrueBAxis0Forward,
+    ARFirstTrueBAxis1Forward,
+    ARFirstTrueBAxis0Reverse,
+    ARFirstTrueBAxis1Reverse,
+
 
     # NPNonZero,
-    # NPArgMaxAxis0,
-    # NPArgMaxAxis1
+    NPArgMaxAxis0,
+    NPArgMaxAxis1
     )
 
 CLS_FF = (
